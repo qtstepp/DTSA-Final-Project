@@ -1,0 +1,83 @@
+---
+title: "DTSA 5301 NYPD Shooting Incident Data"
+output: pdf_document
+date: "2023-11-01"
+---
+
+## NYPD Shooting data is cleaned, analyzed and visualized to derive insights pertaining to violent crime in New York City.
+```{r setup, include=FALSE}
+library(tidyverse)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r get_NYPD_data, echo =TRUE, message = FALSE}
+url <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+nypd_shooting <- read_csv(url)
+```
+
+### Here, the dataset is cleaned in order to facilitate easier analysis. Variables that will not be used are dropped and the OCCUR_DATE variable is changed to MDY format. Additionally variable 'murder' is added by changing the STATISTICAL MURDER FLAG variable to a binary variable. The dataset is sorted by date and rows containing NA are dropped.
+```{r clean, echo = TRUE, message = FALSE}
+nypd_shooting <- nypd_shooting %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE), murder = STATISTICAL_MURDER_FLAG * 1)%>%
+  select(-c(LOC_OF_OCCUR_DESC, LOC_CLASSFCTN_DESC, LOCATION_DESC, X_COORD_CD, Y_COORD_CD, Latitude, 
+            Longitude, INCIDENT_KEY, JURISDICTION_CODE))%>%
+  arrange(OCCUR_DATE)
+drop_na(nypd_shooting)
+```
+
+### I then group the dataset by month and tabulate the sum of all murders in that month, tracked by the STATISTICAL_MURDER_FLAG variable.
+
+```{r monthly, echo = TRUE, message = TRUE}
+monthly <- nypd_shooting %>%
+  group_by(month =floor_date(OCCUR_DATE, 'month'))%>%
+  summarize(sum=sum(murder))
+monthly
+```
+### I then subset the data to show this monthly stat by race, looking at black and white victims.
+```{r monthly_race, echo = TRUE, message = TRUE}
+monthly_blk <- subset(nypd_shooting, VIC_RACE == 'BLACK') %>%
+  group_by(month =floor_date(OCCUR_DATE, 'month'))%>%
+  summarize(sum_blk=sum(murder))
+
+
+monthly_wht <- subset(nypd_shooting, grepl('WHITE', nypd_shooting$VIC_RACE) == TRUE) %>%
+  group_by(month=floor_date(OCCUR_DATE, 'month')) %>%
+  summarize(sum_wht = sum(murder))
+
+
+monthly_race <- monthly_blk %>%
+  full_join(monthly_wht)
+monthly_race
+```
+### Plots are made to visualize these new time-series data subsets.
+```{r plots, message = TRUE, echo = FALSE}
+monthly %>%
+  ggplot(aes(x=month, y=sum)) +
+  geom_line(aes(color = "sum")) +
+  geom_point(aes(color = "sum")) +
+  geom_smooth(method='lm')
+
+monthly_blk %>%
+  ggplot(aes(x=month, y=sum_blk)) +
+  geom_line(aes(color = "sum_blk")) +
+  geom_point(aes(color = "sum_blk")) +
+  geom_smooth(method='lm')
+
+monthly_race %>%
+  ggplot(aes(x = month, y = sum_blk)) + 
+  geom_line(aes(color = "sum_blk")) +
+  geom_point(aes(color = "sum_blk")) +
+  geom_line(aes(y = sum_wht, color = "sum_wht")) +
+  geom_point(aes(y = sum_wht, color = "sum_wht")) +
+  theme(legend.position = "bottom", axis.text.x = element_text(angle = 90)) +
+  labs(title = "Murder Victims in NYC", y  = NULL) +
+  geom_smooth(method = 'lm')
+
+```
+## A model is created comparing the binary variable 'murder' to victim race, perpetrator age group, and perpretator race.
+```{r model, echo = TRUE, message = TRUE}
+model <- lm(murder ~ VIC_RACE + PERP_RACE + PERP_AGE_GROUP, data = nypd_shooting)
+summary(model)
+```
+#### In this project, I focused the murder variable I created by turning the STATISTICAL_MURDER_FLAG variable into a binary one. I initially wanted to see how monthly murders fluctuated over time. I felt that aggregating this data provided for stronger analysis as a binary variable over such a long time period shows very little. I then further aggregated this data to show montly totals for black and white victims. I added a fitted line to each using the geom_smooth function which appears to show a negative trend in monthly murders, a positive outcome in my eyes. Finally, I constructed a model comparing the effects variables PERP_RACE, PERP_AGE_GROUP and PERP_RACE on my 'murder' binary variable. Adjusted R-squared shows 4.889% of the variation in 'murder' is explained by the chosen variables. This is a very low correlation, explaining little of the variation in the murder variable. Because of this, further analysis would be needed to establish a stong connection between certain variables and murder statistics in NYC.
